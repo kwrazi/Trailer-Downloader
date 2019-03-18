@@ -34,6 +34,8 @@ def main():
     # Settings
     settings = getSettings()
 
+    stop_path = os.path.dirname(os.path.abspath( __file__ )) + "/stop"
+    
     # Make sure a directory was passed
     if arguments['directory'] != None:
 
@@ -41,21 +43,27 @@ def main():
         for item in os.listdir(arguments['directory']):
 
             # Make sure the item is a directory
+            if os.path.exists(stop_path):
+                print("Found kill file")
+                break;
+
+            # Make sure the item is a directory
             if os.path.isdir(arguments['directory']+'/'+item):
 
                 # Get variables for the download script
                 title = item.split('(')[0].strip()
-                year = item.split('(')[1].split(')')[0].strip()
+                try:
+                    year = item.split('(')[1].split(')')[0].strip()
+                except IndexError as error:
+                    print('Error extracting year from ' + item)
+                    continue
                 directory = arguments['directory']+'/'+item
 
-                # Make sure the trailer has not already been downloaded
-                if not os.path.exists(directory+'/'+title+' ('+year+')-trailer.mp4'):
+                # Print current item
+                print(item)
 
-                    # Print current item
-                    print(item)
-
-                    # Download trailer for item
-                    os.system(settings['python_path']+' '+os.path.split(os.path.abspath(__file__))[0]+'/download.py --title "'+title+'" --year "'+year+'" --directory "'+directory+'"')
+                # Download trailer for item
+                os.system(settings['python_path']+' '+os.path.split(os.path.abspath(__file__))[0]+'/download.py --title "'+title+'" --year "'+year+'" --directory "'+directory+'"')
 
     else:
 

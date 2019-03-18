@@ -1,3 +1,4 @@
+# This Python file uses the following encoding: utf-8
 from __future__ import unicode_literals
 from argparse import ArgumentParser
 import os
@@ -7,6 +8,9 @@ import socket
 import unicodedata
 import tmdbsimple as tmdb
 import youtube_dl
+import urllib
+import sys
+import requests
 
 # Python 3.0 and later
 try:
@@ -56,9 +60,17 @@ def removeSpecialChars(query):
 def matchTitle(title):
     return unicodedata.normalize('NFKD', removeSpecialChars(title).replace('/', '').replace('\\', '').replace('-', '').replace(':', '').replace('*', '').replace('?', '').replace('"', '').replace("'", '').replace('<', '').replace('>', '').replace('|', '').replace('.', '').replace('+', '').replace(' ', '').lower()).encode('ASCII', 'ignore')
 
+# get final Trailer location
+def getFileLocation(subFolder, title, year):
+    if subFolder:
+        filename = "Trailers/" + title+' ('+year+').mp4'
+    else:
+        filename = title+' ('+year+')-trailer.mp4'
+    return filename
+
 # Load json from url
 def loadJson(url):
-    response = urlopen(url)
+    response = urlopen(url.decode('utf-8'))
     str_response = response.read().decode('utf-8')
     return json.loads(str_response)
 
@@ -107,27 +119,41 @@ def convertUrl(src_url, res):
     file_ending = "_h%sp.mov" % res
     return src_url.replace(src_ending, file_ending)
 
+# Download URL contents to a file with progress
+def download(url, filename):
+    with open(filename, 'wb') as f:
+        response = requests.get(url, headers = {'User-Agent': 'Quick_time/7.6.2'}, stream=True)
+        total = response.headers.get('content-length')
+
+        if total is None:
+            f.write(response.content)
+        else:
+            downloaded = 0
+            total = int(total)
+            for data in response.iter_content(chunk_size=max(int(total / 1000), 1024 * 1024)):
+                downloaded += len(data)
+                f.write(data)
+                done = int(50 * downloaded / total)
+                sys.stdout.write('\r[{}{}]'.format('█' * done, '.' * (50 - done)))
+                sys.stdout.flush()
+    sys.stdout.write('\n')
+
+# Move to final locations
+def moveIntoPlace(source, target):
+    try:
+        # Move downloaded trailer to directory
+        shutil.move(source, target)
+        if not os.path.exists(target):
+            print('Problem moving trailer to ' + target)
+        return
+    except shutil.Error as error:
+        print('Error moving trailer: ' + error.message)
+        return
+
 # Download the file
 def downloadFile(url, destdir, filename):
-    data = None
-    headers = {'User-Agent': 'Quick_time/7.6.2'}
-    req = Request(url, data, headers)
-    chunk_size = 1024 * 1024
-
-    try:
-        server_file_handle = urlopen(req)
-    except HTTPError as error:
-        return
-    except URLError as error:
-        return
-    try:
-        with open(filename, 'wb') as local_file_handle:
-            shutil.copyfileobj(server_file_handle, local_file_handle, chunk_size)
-    except socket.error as error:
-        return
-
-    # Move downloaded trailer to directory
-    shutil.move(filename, destdir+'/'+filename)
+    download(url, '/tmp/' + filename)
+    moveIntoPlace('/tmp/' + filename, destdir + '/' + filename)
 
 # Download from Apple
 def appleDownload(page_url, res, destdir, filename):
@@ -157,8 +183,8 @@ def videosTMDB(id, lang, region, api_key):
     return movie.videos(language=lang+'-'+region)
 
 # Download file from YouTube
-def youtubeDownload(video, min_resolution, max_resolution, title, year, directory, ffmpeg_path):
-    filename = title+' ('+year+')-trailer.mp4'
+def youtubeDownload(video, min_resolution, max_resolution, title, year, directory, ffmpeg_path, subFolder):
+    filename = getFileLocation(subFolder, title, year)
     options = {
         'format': 'bestvideo[ext=mp4][height<='+max_resolution+']+bestaudio[ext=m4a]',
         'default_search': 'ytsearch1:',
@@ -169,7 +195,7 @@ def youtubeDownload(video, min_resolution, max_resolution, title, year, director
         'ignore_warnings': 'TRUE',
         'ignore_errors': 'TRUE',
         'no_playlist': 'TRUE',
-        'outtmpl': filename
+        'outtmpl': '/tmp/' + filename
     }
 
     try:
@@ -179,7 +205,7 @@ def youtubeDownload(video, min_resolution, max_resolution, title, year, director
         # Move downloaded trailer to directory
         if not os.path.exists(directory):
             os.makedirs(directory)
-        shutil.move(filename, directory+'/'+filename)
+        moveIntoPlace('/tmp/' + filename, directory + '/' + filename)
         return file
     except:
         return False
@@ -199,38 +225,44 @@ def main():
         if arguments['directory'] == None and arguments['file'] != None:
             arguments['directory'] = os.path.abspath(os.path.dirname(arguments['file']))
 
+        directory = arguments['directory'].decode('utf-8')
+        title = arguments['title'].decode('utf-8')
+        year = arguments['year'].decode('utf-8')
+        subFolder = False
+        
         # Make sure trailer file doesn't already exist in the directory
-        if not os.path.exists(arguments['directory']+'/'+arguments['title']+' ('+arguments['year']+')-trailer.mp4'):
+        if not os.path.exists(directory + '/' + getFileLocation(subFolder, title, year)):
 
             # Download status
             downloaded = False
 
             # Search Apple for trailer
             if not downloaded:
-                search = searchApple(arguments['title'])
+                search = searchApple(title)
 
                 # Iterate over search results
                 for result in search['results']:
 
                     # Filter by year and title
-                    if arguments['year'].lower() in result['releasedate'].lower() and matchTitle(arguments['title']) == matchTitle(result['title']):
+                    if year.lower() in result['releasedate'].lower() and matchTitle(title) == matchTitle(result['title']):
 
-                        file = appleDownload('https://trailers.apple.com/'+result['location'], settings['resolution'], arguments['directory'], arguments['title']+' ('+arguments['year']+')-trailer.mp4')
+                        file = appleDownload('https://trailers.apple.com/'+result['location'], settings['resolution'], directory, getFileLocation(subFolder, title, year))
 
                         # Update downloaded status
                         if file:
+                            print('Apple download successful.')
                             downloaded = True
                             break
 
             # Search YouTube for trailer
             if not downloaded:
-                search = searchTMDB(arguments['title'], settings['api_key'])
+                search = searchTMDB(title, settings['api_key'])
 
                 # Iterate over search results
                 for result in search['results']:
 
                     # Filter by year and title
-                    if arguments['year'].lower() in result['release_date'].lower() and matchTitle(arguments['title']) == matchTitle(result['title']):
+                    if year.lower() in result['release_date'].lower() and matchTitle(title) == matchTitle(result['title']):
 
                         # Find trailers for movie
                         videos = videosTMDB(result['id'], settings['lang'], settings['region'], settings['api_key'])
@@ -240,15 +272,19 @@ def main():
                                 video = 'https://www.youtube.com/watch?v='+item['key']
 
                                 # Download trailer from YouTube
-                                file = youtubeDownload(video, settings['min_resolution'], settings['max_resolution'], arguments['title'], arguments['year'], arguments['directory'], settings['ffmpeg_path'])
+                                file = youtubeDownload(video, settings['min_resolution'], settings['max_resolution'], title, year, directory, settings['ffmpeg_path'], subFolder)
 
                                 # Update downloaded status
                                 if file:
+                                    print('Youtube download successful.')
                                     downloaded = True
                                     break
 
-                        break
+#                         break
 
+            # Still not found
+            if not downloaded:
+                print('Trailer not found on either Apple or Youtube.')
         else:
 
             print('\033[91mERROR:\033[0m the trailer already exists in the selected directory')
