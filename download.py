@@ -7,7 +7,8 @@ import shutil
 import socket
 import unicodedata
 import tmdbsimple as tmdb
-import youtube_dl
+# import youtube_dl
+import yt_dlp
 import urllib
 import sys
 import requests
@@ -70,7 +71,7 @@ def getFileLocation(subFolder, title, year):
 
 # Load json from url
 def loadJson(url):
-    response = urlopen(url.decode('utf-8'))
+    response = urlopen(url)
     str_response = response.read().decode('utf-8')
     return json.loads(str_response)
 
@@ -200,7 +201,7 @@ def youtubeDownload(video, min_resolution, max_resolution, title, year, director
 
     try:
         # Download
-        with youtube_dl.YoutubeDL(options) as youtube:
+        with yt_dlp.YoutubeDL(options) as youtube:
             file = youtube.extract_info(video, download=True)
         # Move downloaded trailer to directory
         if not os.path.exists(directory):
@@ -225,9 +226,14 @@ def main():
         if arguments['directory'] == None and arguments['file'] != None:
             arguments['directory'] = os.path.abspath(os.path.dirname(arguments['file']))
 
-        directory = arguments['directory'].decode('utf-8')
-        title = arguments['title'].decode('utf-8')
-        year = arguments['year'].decode('utf-8')
+        try:
+            directory = arguments['directory'].decode('utf-8')
+            title = arguments['title'].decode('utf-8')
+            year = arguments['year'].decode('utf-8')
+        except AttributeError:
+            directory = arguments['directory']
+            title = arguments['title']
+            year = arguments['year']
         subFolder = False
         
         # Make sure trailer file doesn't already exist in the directory
